@@ -1,7 +1,7 @@
 pipeline {
     agent {
         docker {
-            image 'jibin321/maven-docker-agent'
+            image 'jibin321/maven-docker-agent:v1'
             args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
@@ -60,7 +60,7 @@ pipeline {
                     docker build \
                         -t ${DOCKER_IMAGE}:${BUILD_NUMBER} \
                         .
-                    echo "Docker image built:"
+                    echo "Docker image built successfully."
                     docker images | grep "${DOCKER_IMAGE}"
                 '''
             }
