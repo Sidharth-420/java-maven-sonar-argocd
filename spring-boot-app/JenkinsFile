@@ -1,11 +1,6 @@
 pipeline {
 
-    agent {
-        docker {
-            image 'jibin321/maven-docker-agent'
-            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+    agent any
 
     environment {
         DOCKER_IMAGE  = "sidharth18/ultimate-cicd"
@@ -27,13 +22,11 @@ pipeline {
 
                 sh '''
                     echo "===== CHECKOUT ====="
-                    echo "Checkout successful"
                     pwd
                     ls -la
                 '''
             }
         }
-
 
         stage('Build and Test') {
             steps {
@@ -51,12 +44,9 @@ pipeline {
             }
         }
 
-
         stage('SonarQube Analysis') {
             steps {
-
                 withSonarQubeEnv('sonarqube') {
-
                     sh '''
                         echo "===== SONARQUBE ANALYSIS ====="
 
@@ -71,10 +61,8 @@ pipeline {
             }
         }
 
-
         stage('Build Docker Image') {
             steps {
-
                 sh '''
                     echo "===== DOCKER BUILD ====="
 
@@ -91,10 +79,8 @@ pipeline {
             }
         }
 
-
         stage('Push Docker Image') {
             steps {
-
                 script {
 
                     echo "===== DOCKER PUSH ====="
@@ -108,7 +94,6 @@ pipeline {
                     ) {
 
                         dockerImage.push()
-
                         dockerImage.push('latest')
                     }
 
@@ -117,9 +102,7 @@ pipeline {
             }
         }
 
-
         stage('Update Kubernetes Deployment') {
-
             steps {
 
                 withCredentials([
@@ -132,13 +115,13 @@ pipeline {
                     sh '''
                         echo "===== UPDATE KUBERNETES DEPLOYMENT ====="
 
-                        echo "Cloning GitHub repository..."
-
                         rm -rf gitops-repo
 
+                        echo "Cloning GitHub repository..."
+
                         git clone \
-                            https://${GITHUB_TOKEN}@github.com/Sidharth-420/java-maven-sonar-argocd.git \
-                            gitops-repo
+                          https://${GITHUB_TOKEN}@github.com/Sidharth-420/java-maven-sonar-argocd.git \
+                          gitops-repo
 
                         cd gitops-repo
 
@@ -147,69 +130,58 @@ pipeline {
                         git config user.email "sidharthshai98@gmail.com"
                         git config user.name "Sidharth-420"
 
-                        echo "===== CURRENT DEPLOYMENT IMAGE ====="
+                        echo "===== BEFORE UPDATE ====="
 
                         grep "image:" \
-                            spring-boot-app-manifests/deployment.yml \
-                            || true
+                          spring-boot-app-manifests/deployment.yml || true
 
                         echo "===== UPDATING IMAGE ====="
 
                         sed -i "s|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" \
-                            spring-boot-app-manifests/deployment.yml
+                          spring-boot-app-manifests/deployment.yml
 
-                        echo "===== UPDATED DEPLOYMENT IMAGE ====="
+                        echo "===== AFTER UPDATE ====="
 
                         grep "image:" \
-                            spring-boot-app-manifests/deployment.yml
-
-                        echo "===== GIT STATUS ====="
+                          spring-boot-app-manifests/deployment.yml
 
                         git status
 
-                        git add \
-                            spring-boot-app-manifests/deployment.yml
+                        git add spring-boot-app-manifests/deployment.yml
 
                         git commit \
-                            -m "Update Docker image to ${BUILD_NUMBER} [skip ci]" \
-                            || echo "No changes to commit"
+                          -m "Update Docker image to ${BUILD_NUMBER} [skip ci]" \
+                          || echo "No changes to commit"
 
                         echo "===== PUSHING TO GITHUB ====="
 
                         git push \
-                            https://${GITHUB_TOKEN}@github.com/Sidharth-420/java-maven-sonar-argocd.git \
-                            HEAD:main
+                          https://${GITHUB_TOKEN}@github.com/Sidharth-420/java-maven-sonar-argocd.git \
+                          HEAD:main
 
-                        echo "======================================"
-                        echo "KUBERNETES DEPLOYMENT UPDATED"
-                        echo "Image: ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                        echo "======================================"
+                        echo "GitHub deployment file updated successfully."
                     '''
                 }
             }
         }
     }
 
-
     post {
-
         success {
-
             echo '''
-            ======================================
-            CI/CD PIPELINE COMPLETED SUCCESSFULLY
-            ======================================
-            '''
+======================================
+CI/CD PIPELINE COMPLETED SUCCESSFULLY
+======================================
+'''
         }
 
         failure {
-
             echo '''
-            ======================================
-            CI/CD PIPELINE FAILED
-            Check the Jenkins console output.
-            ======================================
-            '''
+======================================
+CI/CD PIPELINE FAILED
+Check the Jenkins console output.
+======================================
+'''
         }
     }
 }
