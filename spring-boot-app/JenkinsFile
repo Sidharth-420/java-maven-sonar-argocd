@@ -1,186 +1,177 @@
 pipeline {
-
-    agent any
-
+    agent {
+        docker {
+            image 'maven:3.9.9-eclipse-temurin-17'
+            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
+        }
+    }
     environment {
         DOCKER_IMAGE  = "sidharth18/ultimate-cicd"
         GIT_REPO_NAME = "java-maven-sonar-argocd"
         GIT_USER_NAME = "Sidharth-420"
     }
-
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
         skipDefaultCheckout(true)
     }
-
     stages {
-
-        stage('Checkout') {
+        stage('Prepare Build Agent') {
             steps {
-                checkout scm
-
                 sh '''
-                    echo "===== CHECKOUT ====="
-                    pwd
-                    ls -la
+                    echo "===== PREPARING BUILD AGENT ====="
+                    apt-get update
+                    apt-get install -y docker.io git
+                    echo "===== JAVA ====="
+                    java -version
+                    echo "===== MAVEN ====="
+                    mvn -version
+                    echo "===== DOCKER ====="
+                    docker --version
+                    echo "===== GIT ====="
+                    git --version
                 '''
             }
         }
-
+        stage('Checkout') {
+            steps {
+                checkout scm
+                sh '''
+                    echo "===== CHECKOUT ====="
+                    echo "Workspace:"
+                    pwd
+                    echo "Files:"
+                    ls -la
+                    echo "Git status:"
+                    git status
+                '''
+            }
+        }
         stage('Build and Test') {
             steps {
                 sh '''
                     echo "===== BUILD AND TEST ====="
-
                     cd spring-boot-app
-
                     mvn clean package
-
-                    echo "Build completed successfully."
-
+                    echo "===== BUILD SUCCESSFUL ====="
                     ls -lh target/
                 '''
             }
         }
-
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube') {
                     sh '''
                         echo "===== SONARQUBE ANALYSIS ====="
-
                         cd spring-boot-app
-
                         mvn org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar \
                           -Dsonar.projectKey=my-ec2-project \
                           -Dsonar.projectName="Spring Boot App" \
                           -Dsonar.host.url=$SONAR_HOST_URL
+                        echo "===== SONARQUBE ANALYSIS COMPLETED ====="
                     '''
                 }
             }
         }
-
         stage('Build Docker Image') {
             steps {
                 sh '''
                     echo "===== DOCKER BUILD ====="
-
                     cd spring-boot-app
-
                     docker build \
                         -t ${DOCKER_IMAGE}:${BUILD_NUMBER} \
                         .
-
-                    echo "Docker image built successfully."
-
+                    echo "===== DOCKER IMAGE CREATED ====="
                     docker images | grep "${DOCKER_IMAGE}"
                 '''
             }
         }
-
         stage('Push Docker Image') {
             steps {
                 script {
-
                     echo "===== DOCKER PUSH ====="
-
                     def dockerImage =
                         docker.image("${DOCKER_IMAGE}:${BUILD_NUMBER}")
-
                     docker.withRegistry(
                         'https://index.docker.io/v1/',
                         'docker-cred'
                     ) {
-
                         dockerImage.push()
                         dockerImage.push('latest')
                     }
-
-                    echo "Docker image pushed successfully."
+                    echo "===== DOCKER IMAGE PUSHED ====="
+                    echo "${DOCKER_IMAGE}:${BUILD_NUMBER}"
                 }
             }
         }
-
         stage('Update Kubernetes Deployment') {
             steps {
-
                 withCredentials([
                     string(
                         credentialsId: 'github',
                         variable: 'GITHUB_TOKEN'
                     )
                 ]) {
-
                     sh '''
                         echo "===== UPDATE KUBERNETES DEPLOYMENT ====="
-
                         rm -rf gitops-repo
-
                         echo "Cloning GitHub repository..."
-
                         git clone \
                           https://${GITHUB_TOKEN}@github.com/Sidharth-420/java-maven-sonar-argocd.git \
                           gitops-repo
-
                         cd gitops-repo
-
-                        echo "Repository cloned successfully."
-
+                        echo "===== REPOSITORY CLONED ====="
                         git config user.email "sidharthshai98@gmail.com"
                         git config user.name "Sidharth-420"
-
-                        echo "===== BEFORE UPDATE ====="
-
+                        echo "===== IMAGE BEFORE UPDATE ====="
                         grep "image:" \
                           spring-boot-app-manifests/deployment.yml || true
-
                         echo "===== UPDATING IMAGE ====="
-
                         sed -i "s|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" \
                           spring-boot-app-manifests/deployment.yml
-
-                        echo "===== AFTER UPDATE ====="
-
+                        echo "===== IMAGE AFTER UPDATE ====="
                         grep "image:" \
                           spring-boot-app-manifests/deployment.yml
-
+                        echo "===== GIT STATUS ====="
                         git status
-
-                        git add spring-boot-app-manifests/deployment.yml
-
+                        git add \
+                          spring-boot-app-manifests/deployment.yml
                         git commit \
                           -m "Update Docker image to ${BUILD_NUMBER} [skip ci]" \
                           || echo "No changes to commit"
-
-                        echo "===== PUSHING TO GITHUB ====="
-
+                        echo "===== PUSHING DEPLOYMENT TO GITHUB ====="
                         git push \
                           https://${GITHUB_TOKEN}@github.com/Sidharth-420/java-maven-sonar-argocd.git \
                           HEAD:main
-
-                        echo "GitHub deployment file updated successfully."
+                        echo "===== GITHUB UPDATE SUCCESSFUL ====="
                     '''
                 }
             }
         }
     }
-
     post {
         success {
             echo '''
-======================================
-CI/CD PIPELINE COMPLETED SUCCESSFULLY
-======================================
+========================================
+       CI/CD PIPELINE SUCCESSFUL
+========================================
+       Build completed successfully
+       Maven       : SUCCESS
+       SonarQube   : SUCCESS
+       Docker      : SUCCESS
+       Docker Hub  : SUCCESS
+       GitOps      : SUCCESS
+========================================
 '''
         }
-
         failure {
             echo '''
-======================================
-CI/CD PIPELINE FAILED
-Check the Jenkins console output.
-======================================
+========================================
+          CI/CD PIPELINE FAILED
+========================================
+       Check the Jenkins console
+       output for the failed stage.
+========================================
 '''
         }
     }
