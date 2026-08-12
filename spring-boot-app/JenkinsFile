@@ -1,157 +1,130 @@
 pipeline {
-
     agent {
         docker {
-            image 'jib121/maven-docker-agent'
+            image 'jibin321/maven-docker-agent'
             args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
-
     environment {
-        DOCKER_IMAGE = "sidharth18/ultimate-cicd"
+        DOCKER_IMAGE  = "sidharth18/ultimate-cicd"
         GIT_REPO_NAME = "java-maven-sonar-argocd"
         GIT_USER_NAME = "Sidharth-420"
     }
-
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
         skipDefaultCheckout(true)
     }
-
     stages {
-
         stage('Checkout') {
             steps {
                 checkout scm
-
                 sh '''
+                    echo "===== CHECKOUT ====="
                     echo "Checkout successful"
-                    echo "Workspace:"
                     pwd
                     ls -la
                 '''
             }
         }
-
         stage('Build and Test') {
             steps {
                 sh '''
+                    echo "===== BUILD AND TEST ====="
                     cd spring-boot-app
-
-                    echo "Building Spring Boot application..."
-
                     mvn clean package
-
                     echo "Build completed successfully."
                     ls -lh target/
                 '''
             }
         }
-
         stage('SonarQube Analysis') {
             steps {
-                withCredentials([
-                    string(
-                        credentialsId: 'sonarqube',
-                        variable: 'SONAR_AUTH_TOKEN'
-                    )
-                ]) {
-
+                withSonarQubeEnv('sonarqube') {
                     sh '''
+                        echo "===== SONARQUBE ANALYSIS ====="
                         cd spring-boot-app
-
-                        mvn sonar:sonar \
-                          -Dsonar.projectKey=java-maven-sonar-argocd \
-                          -Dsonar.projectName="Java Maven Sonar ArgoCD" \
-                          -Dsonar.host.url=http://34.201.116.83:9000 \
-                          -Dsonar.token=$SONAR_AUTH_TOKEN
+                        mvn org.sonarsource.scanner.maven:sonar-maven-plugin:5.1.0.4751:sonar \
+                          -Dsonar.projectKey=my-ec2-project \
+                          -Dsonar.projectName="Spring Boot App" \
+                          -Dsonar.host.url=$SONAR_HOST_URL
                     '''
                 }
             }
         }
-
         stage('Build Docker Image') {
             steps {
                 sh '''
+                    echo "===== DOCKER BUILD ====="
                     cd spring-boot-app
-
                     docker build \
-                      -t ${DOCKER_IMAGE}:${BUILD_NUMBER} \
-                      .
+                        -t ${DOCKER_IMAGE}:${BUILD_NUMBER} \
+                        .
+                    echo "Docker image built:"
+                    docker images | grep "${DOCKER_IMAGE}"
                 '''
             }
         }
-
         stage('Push Docker Image') {
             steps {
                 script {
-
+                    echo "===== DOCKER PUSH ====="
                     def dockerImage =
                         docker.image("${DOCKER_IMAGE}:${BUILD_NUMBER}")
-
                     docker.withRegistry(
                         'https://index.docker.io/v1/',
                         'docker-cred'
                     ) {
-
                         dockerImage.push()
-
                         dockerImage.push('latest')
                     }
+                    echo "Docker image pushed successfully."
                 }
             }
         }
-
         stage('Update Kubernetes Deployment') {
             steps {
-
                 withCredentials([
                     string(
                         credentialsId: 'github',
                         variable: 'GITHUB_TOKEN'
                     )
                 ]) {
-
                     sh '''
+                        echo "===== UPDATE KUBERNETES DEPLOYMENT ====="
                         git config user.email "sidharthshai98@gmail.com"
                         git config user.name "${GIT_USER_NAME}"
-
-                        echo "Updating Kubernetes deployment..."
-
+                        echo "Updating deployment image..."
                         sed -i "s|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g" \
-                        spring-boot-app-manifests/deployment.yml
-
-                        echo "Updated deployment:"
-                        grep "image:" spring-boot-app-manifests/deployment.yml
-
-                        git add spring-boot-app-manifests/deployment.yml
-
+                            spring-boot-app-manifests/deployment.yml
+                        echo "Current deployment image:"
+                        grep "image:" \
+                            spring-boot-app-manifests/deployment.yml
+                        git add \
+                            spring-boot-app-manifests/deployment.yml
                         git commit \
-                          -m "Update Docker image to ${BUILD_NUMBER} [skip ci]" \
-                          || echo "No changes to commit"
-
+                            -m "Update Docker image to ${BUILD_NUMBER} [skip ci]" \
+                            || echo "No changes to commit"
                         git push \
-                          https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git \
-                          HEAD:main
+                            https://${GITHUB_TOKEN}@github.com/${GIT_USER_NAME}/${GIT_REPO_NAME}.git \
+                            HEAD:main
+                        echo "Kubernetes deployment updated in GitHub."
                     '''
                 }
             }
         }
     }
-
     post {
-
         success {
-            echo 'CI/CD Pipeline completed successfully!'
+            echo '======================================'
+            echo 'CI/CD PIPELINE COMPLETED SUCCESSFULLY'
+            echo '======================================'
         }
-
         failure {
-            echo 'Pipeline failed. Check the Jenkins console output.'
-        }
-
-        always {
-            cleanWs()
+            echo '======================================'
+            echo 'CI/CD PIPELINE FAILED'
+            echo 'Check the Jenkins console output.'
+            echo '======================================'
         }
     }
 }
